@@ -1,2 +1,3 @@
 ./dev_git_ignore/
+./__pycache__/
 wip*
