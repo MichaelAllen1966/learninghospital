@@ -1,4 +1,4 @@
-./dev_git_ignore/
+./dev_git_ignore/*
 ./ipynb_checkpoints/
-./__pycache__/
+./__pycache__/*
 wip*
