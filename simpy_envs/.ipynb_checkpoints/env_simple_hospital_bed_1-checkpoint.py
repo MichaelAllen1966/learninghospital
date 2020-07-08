@@ -24,13 +24,23 @@ class HospGym:
 
     __init__:
         Constructor method.
-    is_terminal_state:
-        Check whether episode is complete
+    adjust_bed_numbers:
+        Introduces delay before bed numbers actually change
+    adjust_pending_bed_change:
+        Track pending bed changes in state dictionary
+    calculate_reward:
+        Calculates reward based on empty beds or beds without patient
+    load_patients:
+        Inital load of patients into hospital (avoid starting empty)
+    new_admission:
+        Loop creating new patient admissions
+    patient_spell:
+        Patient spell in hospital sim
     render:
         Display state 
     reset:
         Initialise environment
-        Return obs, reward, terminal, info
+        Return first state observations
     step:
         Take an action. Update state. Return obs, reward, terminal, info
         
@@ -66,8 +76,8 @@ class HospGym:
 
     """
     
-    def __init__(self, arrivals_per_day=50, delay_to_change_beds=2, los=7,
-                 penalty_for_empty_bed=1, penalty_for_patients_without_bed=1.2,
+    def __init__(self, arrivals_per_day=100, delay_to_change_beds=2, los=5,
+                 penalty_for_empty_bed=1, penalty_for_patients_without_bed=1.25,
                  render_env=False, sim_duration=365):
                  
         """
@@ -220,7 +230,8 @@ class HospGym:
         for patient in range(number_to_load):
             self.state['beds'] += 1
             self.state['patients'] += 1
-            self.patient_spell(los_adjustment=0.5)
+            self.env.process(self.patient_spell(los_adjustment=0.5))
+            
     
     def new_admission(self):
         """
