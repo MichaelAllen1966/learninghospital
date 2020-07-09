@@ -7,35 +7,46 @@ class HospGym:
     Reinforcement Learning.
     
     Any environment needs:
-    * A reward structure
-    * An initialise (reset) method that returns the initial observations,
-        reward, whether state is terminal, additional information.
-    * A choice of actions 
     * A state space
+    * A reward structure
+    * An initialise (reset) method that returns the initial observations
+    * A choice of actions 
     * A way to make sure the action is legal/possible
-    * A way for the action to affect environment
-    * A step function that returns the new observations, reward,
-        whether state is terminal, additional information
-    * A way to render the environment.
+    * A step method that passes an action to the environment and returns:
+        1. the state new observations
+        2. reward
+        3. whether state is terminal
+        4. additional information
+    * A method to render the environment.
+    * A way to recognise and return a terminal state (end of episode)
     
     
-    Methods:
-    --------
+    Internal methods:
+    -----------------
 
     __init__:
         Constructor method.
-    adjust_bed_numbers:
+    _adjust_bed_numbers:
         Introduces delay before bed numbers actually change
-    adjust_pending_bed_change:
+    _adjust_pending_bed_change:
         Track pending bed changes in state dictionary
-    calculate_reward:
+    _calculate_reward:
         Calculates reward based on empty beds or beds without patient
-    load_patients:
+    _islegal:
+        Checks whether requested action is legal
+    _get_obs:
+        Gets current state observation
+    _load_patients:
         Inital load of patients into hospital (avoid starting empty)
-    new_admission:
+    _new_admission:
         Loop creating new patient admissions
-    patient_spell:
+    _patient_spell:
         Patient spell in hospital sim
+        
+        
+    Interfacing methods:
+    --------------------
+
     render:
         Display state 
     reset:
@@ -45,7 +56,7 @@ class HospGym:
         Take an action. Update state. Return obs, reward, terminal, info
         
     
-    Input parameters (converted to parameters)
+    Input parameters (converted to attributes)
     ------------------------------------------
         
     arrivals_per_day:
@@ -54,31 +65,44 @@ class HospGym:
         Time between requesting change in beds, and change in beds happening
     los:
         Average patient length of stay
-    penalty_for_empty_bed:
-        reward penalty for each empty beds
-    penalty_for_patients_without_bed:
-        reward penalty for  each patient without bed
     render_env:
-        Boolean, render simulation
+        Boolean, render state each action?
     sim_duration:
-        Length of simulation run (days)  
+        Length of simulation run (days)
+    target_reserve:
+        target free beds as a proporion of # patients present
+        
     
     Additional attributes:
     ----------------------    
-    state:
-        SimPyGymState object (dictionary)
+
+    action_size:
+        Number of possible actions   
     actions:
         List of possible actions
     arrivals_by_day:
         Dictionary of average arrivals by day of week
+    observation_size:
+        Number of features in observation space
+    state:
+        SimPyGymState object (dictionary)
         
+        
+    State dictionary
+    ----------------
     
+    The state dictionary contains the following items:
+        weekday: day of week (0-6)
+        beds: number of available beds (free or occupied)
+        patients: number of patients in hospital
+        spare_beds: number of beds without patient
+        pending_bed_change: pending requests for bed changes
+            
 
     """
     
     def __init__(self, arrivals_per_day=100, delay_to_change_beds=2, los=5,
-                 penalty_for_empty_bed=1, penalty_for_patients_without_bed=1.25,
-                 render_env=False, sim_duration=365):
+                 render_env=False, sim_duration=365, target_reserve=0.05, time_step=1):
                  
         """
         Constructor method for HospGym class.
@@ -92,14 +116,14 @@ class HospGym:
             Time between requesting change in beds, and change in beds happening
         los:
             Average patient length of stay
-        penalty_for_empty_bed:
-            reward penalty for each empty beds
-        penalty_for_patients_without_bed:
-            reward penalty for  each patient without bed
         render_env:
             Boolean, render simulation
         sim_duration:
-            Length of simulation run (days)        
+            Length of simulation run (days)
+        target_reserve:
+            target free beds as a proporion of # patients present
+        time_step:
+            Time between action steps
         """
         
         # set average length of stay
@@ -131,12 +155,13 @@ class HospGym:
         # Set delay_to_change_beds
         self.delay_to_change_beds = delay_to_change_beds
         
-        # Set up costs
-        self.penalty_for_empty_bed = penalty_for_empty_bed
-        self.penalty_for_patients_without_bed = penalty_for_patients_without_bed
+        # Set up taregt reserve (target free beds as a proporion of # patients present)
+        self.target_reserve = target_reserve
         
-        # Set sim duration (returns Terminal state after this)
+        # Set sim duration (returns Terminal state after this) and time steps
         self.sim_duration = sim_duration
+        self.time_step = time_step
+        self.next_time_stop = 0
         
         # Set up observation and action space sizes
         self.observation_size = 5
@@ -152,10 +177,10 @@ class HospGym:
                 self.arrivals_by_day[day_num] = arrivals_per_day * 0.5       
   
     
-    def adjust_bed_numbers(self, action):       
+    def _adjust_bed_numbers(self, action):       
         
         """
-        Delay before bed numbers actually change
+        introduces a delay before bed numbers actually change.
         If delay >0 then reduce by 0.001 to include count in next action return
         """
         
@@ -185,7 +210,7 @@ class HospGym:
         self.state['spare_beds'] = self.state['beds'] - self.state['patients']
             
             
-    def adjust_pending_bed_change(self, action):
+    def _adjust_pending_bed_change(self, action):
         """
         Adjust tracker (in state dictionary) of bed changes requested but not
         yet carried out.
@@ -205,22 +230,30 @@ class HospGym:
             self.state['pending_bed_change'] += 20        
             
     
-    def calculate_reward(self):
+    def _calculate_reward(self):
         """
         Calculate reward (always negative or 0)
         """
-                       
-        if self.state['spare_beds'] > 0:
-            loss = - (self.state['spare_beds'] * self.penalty_for_empty_bed)
-        elif self.state['spare_beds'] < 0:
-            loss = (self.state['spare_beds'] * 
-                    self.penalty_for_patients_without_bed)
-        else:
-            loss = 0
+        
+        target_spare_beds = int(self.state['patients'] * self.target_reserve)
+        spare_beds_above_target = self.state['spare_beds'] - target_spare_beds
+        
+        # loss = negative value of diffrence in spare beds from target spare beds
+        loss = -abs(spare_beds_above_target)
                     
         return loss
     
-    def load_patients(self):
+    
+    def _islegal(self, action):
+        """
+        Check action is in list of allowed actions. If not, raise an exception.
+        """
+        
+        if action not in self.actions:
+            raise ValueError('Requested action not in list of allowed actions')
+            
+    
+    def _load_patients(self):
         """
         Load hospital accoriding to calulated average occupancy. Assume average
         los of patients load = half of total avaerage los
@@ -230,10 +263,10 @@ class HospGym:
         for patient in range(number_to_load):
             self.state['beds'] += 1
             self.state['patients'] += 1
-            self.env.process(self.patient_spell(los_adjustment=0.5))
+            self.env.process(self._patient_spell(inital_load=True))
             
     
-    def new_admission(self):
+    def _new_admission(self):
         """
         New admissions to hospital.
         Sample inter-arrival times from inverse exponential distribution.
@@ -246,7 +279,7 @@ class HospGym:
                 self.state['beds'] - self.state['patients'])
         
             # Call patient spell process
-            self.env.process(self.patient_spell())
+            self.env.process(self._patient_spell())
             
             # Update weekday
             self.state['weekday'] = int((self.env.now) % 7)
@@ -257,16 +290,19 @@ class HospGym:
             yield self.env.timeout(next_admission)
             
             
-    def patient_spell(self, los_adjustment=1):
+    def _patient_spell(self, inital_load=False):
         """
         Patient spell in hospital. 
         Sample length of stay from inverse exponential distribution.
-        los_adjustment is used to adjust average length of stay for patients
-          loaded into model at start (assume remaining los is half normal los)
+        If patient is an inital load patient then multiple los by random 0-1
+          to mimic variation of fraction of los already used
         """
         
         # Get length of stay from distributin
-        patient_los = random.expovariate(1 / (self.los * los_adjustment))
+        patient_los = random.expovariate(1 / self.los)
+        # If inital load get remaining los by multiplying by random 0-1
+        if inital_load:
+            patient_los *= random.random()
         
         # Simulation timeout for length of stay
         yield self.env.timeout(patient_los)
@@ -279,6 +315,19 @@ class HospGym:
         self.state['spare_beds'] = self.state['beds'] - self.state['patients']
        
     
+    def _get_observations(self):
+        """Returns current state observation"""
+        
+        # Update weekday
+        self.state['weekday'] = int((self.env.now) % 7)
+        
+        # Put state dictionary items into observations list
+        observations = [v for k,v in self.state.items()]
+        
+        # Return starting state observations
+        return observations
+        
+    
     def render(self):
         """Display current state"""
         
@@ -289,16 +338,16 @@ class HospGym:
         print (f"Pending bed change: {self.state['pending_bed_change']}")
         
     
-    
     def reset(self):
         """Reset environemnt"""
         
         # Initialise simpy environemnt
         self.env = simpy.Environment()
+        self.next_time_stop = 0
         
         # Set up starting processes
-        self.env.process(self.new_admission())
-        
+        self.env.process(self._new_admission())
+
         # Set starting state values
         self.state['weekday'] = 0
         self.state['beds'] = 0
@@ -307,13 +356,12 @@ class HospGym:
         self.state['pending_bed_change'] = 0
         
         # Inital load of patients (to average occupancy)
-        self.load_patients()
-        
-        # Put state dict into obs list
-        obs = [v for k,v in self.state.items()]
+        self._load_patients()
         
         # Return starting state observations
-        return obs
+        observations = self._get_observations()
+        return observations
+        
 
     def step(self, action):
         
@@ -328,55 +376,55 @@ class HospGym:
         There is a delay between request for bed number change and the number of
         changes actually occuring (specified in self.delay_to_change_beds).
         
-        
-        The act method requests bed changes and then returns a tuple of:
-
-        * obs: weekday, beds, patients, spare_beds, pending_bed_change
-        * reward: -1 for each unoccupied bed, -3 for each patient without bed
+        The step method:
+         1. Tracks changes to requested bed numbers
+         2. Updates weekday
+         3. Calls bed change process
+         4. Calls a step in the simulation
+         5. Puts state dictionary items into observations list
+         6. Checks whether terminal state reached (based on sim time)
+         7. Get reward
+         8. Creates empty info dictionary (used to be compatble with OpenAI Gym)
+         9. Renders environemnt if requested
+        10. Returns (observations, reward, terminal, info)
+                
+        Returns
+        -------
+        * observations: weekday, beds, patients, spare_beds, pending_bed_change
+        * reward: pentalty of unoccupied beds or patients without beds
         * terminal: if sim has reached specified duration
         * info: an empty dictionary
             
         """
         
+        # Check action is legal (raise exception if not):
+        self._islegal(action)
+                    
         # Adjust pending bed change (tracks changes in beds due)
-        self.adjust_pending_bed_change(action)
+        self._adjust_pending_bed_change(action)
+            
+        # Call bed change process
+        self.env.process(self._adjust_bed_numbers(action))        
         
-        # Update state weekday
-        self.state['weekday'] = int((self.env.now) % 7)
+        # Make a step in the simulation
+        self.next_time_stop += self.time_step
+        self.env.run(until=self.next_time_stop)
         
-         # Call bed change process  
-        self.env.process(self.adjust_bed_numbers(action))       
+        # Get new observations
+        observations = self._get_observations()
         
-        # Put state dict into obs list
-        obs = [v for k,v in self.state.items()]
-        
-        # Chck whether terminal state (based on sim duration)
+        # Check whether terminal state reached (based on sim time)
         terminal = True if self.env.now >= self.sim_duration else False
         
-        # Calculate reward
-        reward = self.calculate_reward()
+        # Get reward
+        reward = self._calculate_reward()
         
-        # Information is empty dictionary
+        # Information is empty dictionary (used to be compatble with OpenAI Gym)
         info = dict()
         
+        # Render environment if requested
         if self.render_env:
             self.render()
         
-        # Return tuple of obs, reward, terminal, info
-        return (obs, reward, terminal, info)
-        
-
-        
-        
-        
-
-        
-        
-        
-        
-        
-        
-    
-    
-
-
+        # Return tuple of observations, reward, terminal, info
+        return (observations, reward, terminal, info)
