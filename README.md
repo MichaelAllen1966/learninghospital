@@ -27,3 +27,7 @@ To deactivate:
 To update environment (from updated yml file):
 
 `conda env update --prefix ./env --file environment.yml  --prune`
+
+To remove the environemnt:
+
+`conda env remove -n rlsimpy`
