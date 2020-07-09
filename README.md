@@ -1,6 +1,8 @@
 # learninghospital
 Combining Deep RL and SimPy models of hospital systems
 
+[![DOI](https://zenodo.org/badge/277261877.svg)](https://zenodo.org/badge/latestdoi/277261877)
+
 ## Run on BinderHub:
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/MichaelAllen1966/learninghospital/master)
