@@ -76,10 +76,10 @@ class HospGym:
     Additional attributes:
     ----------------------    
 
-    action_size:
-        Number of possible actions   
     actions:
         List of possible actions
+    action_size:
+        Number of possible actions   
     arrivals_by_day:
         Dictionary of average arrivals by day of week
     observation_size:
@@ -111,19 +111,19 @@ class HospGym:
         ----------------
         
         arrivals_per_day:
-            Average arrivsls per day
+            Average arrivals per day
         delay_to_change_beds:
-            Time between requesting change in beds, and change in beds happening
+            Time between requesting change in beds, and change in beds happening (days)
         los:
-            Average patient length of stay
+            Average patient length of stay (days)
         render_env:
             Boolean, render simulation
         sim_duration:
             Length of simulation run (days)
         target_reserve:
-            target free beds as a proporion of # patients present
+            target free beds as a proportion of # patients present
         time_step:
-            Time between action steps
+            Time between action steps (days)
         """
         
         # set average length of stay
@@ -200,6 +200,9 @@ class HospGym:
         elif action == 1:
             self.state['beds'] -= 10
             self.state['pending_bed_change'] += 10
+        elif action == 2:
+            self.state['beds'] += 0
+            self.state['pending_bed_change'] += 0
         elif action == 3:
             self.state['beds'] += 10
             self.state['pending_bed_change'] -= 10
@@ -242,6 +245,19 @@ class HospGym:
         loss = -abs(spare_beds_above_target)
                     
         return loss
+    
+    
+    def _get_observations(self):
+        """Returns current state observation"""
+        
+        # Update weekday
+        self.state['weekday'] = int((self.env.now) % 7)
+        
+        # Put state dictionary items into observations list
+        observations = [v for k,v in self.state.items()]
+        
+        # Return starting state observations
+        return observations
     
     
     def _islegal(self, action):
@@ -312,21 +328,8 @@ class HospGym:
             
         # Adjust patient and bed counts as patient leaves hospital
         self.state['patients'] -= 1
-        self.state['spare_beds'] = self.state['beds'] - self.state['patients']
-       
-    
-    def _get_observations(self):
-        """Returns current state observation"""
-        
-        # Update weekday
-        self.state['weekday'] = int((self.env.now) % 7)
-        
-        # Put state dictionary items into observations list
-        observations = [v for k,v in self.state.items()]
-        
-        # Return starting state observations
-        return observations
-        
+        self.state['spare_beds'] = self.state['beds'] - self.state['patients']     
+     
     
     def render(self):
         """Display current state"""
